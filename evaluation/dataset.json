@@ -1,0 +1,17 @@
+[
+    {
+      "question": "What is the standard warranty period for S-Presso?",
+      "reference": "36 months or 100,000 km, whichever comes first.",
+      "relevant_pages": [8]
+    },
+    {
+      "question": "What should I do if the engine overheats?",
+      "reference": "",
+      "relevant_pages": []
+    },
+    {
+      "question": "What precautions should be taken before checking engine oil?",
+      "reference": "",
+      "relevant_pages": []
+    }
+  ]

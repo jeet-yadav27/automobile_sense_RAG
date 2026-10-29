@@ -1,0 +1,26 @@
+
+[
+    {
+      "question": "What is the standard warranty period for S-Presso?",
+      "reference": "The standard warranty is 36 months or 100,000 km, whichever comes first, from the date of invoice to the first owner.",
+      "relevant_chunk_ids": [
+        "page_8_chunk_0"
+      ]
+    },
+    {
+      "question": "What happens if the vehicle exceeds the warranty mileage limit?",
+      "reference": "The standard vehicle warranty ends when the vehicle reaches 100,000 km, even if 36 months have not elapsed. Certain components have separate warranty terms.",
+      "relevant_chunk_ids": [
+        "page_8_chunk_0"
+      ]
+    },
+    {
+      "question": "What are the recommended engine oil checking precautions?",
+      "reference": "Check the engine oil on a level surface before starting the engine or at least five minutes after stopping it. Remove and clean the dipstick, insert it fully, and check that the oil is between the upper and lower marks. Avoid overfilling and check the level regularly.",
+      "relevant_chunk_ids": [
+        "page_182_chunk_0",
+        "page_182_chunk_1"
+      ]
+    }
+  ]
+  
