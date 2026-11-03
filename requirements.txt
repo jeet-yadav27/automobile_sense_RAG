@@ -1,1 +1,63 @@
-.\.venv\Scripts\python.exe -m pip install ragas datasets pandas langchain-openai
+
+# FastAPI Backend
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+
+# LangChain and LLM
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-text-splitters
+langgraph
+openai
+tiktoken
+
+# Vector Database and Retrieval
+qdrant-client
+sentence-transformers
+rank-bm25
+
+# PDF and Document Processing
+pymupdf
+pypdf
+
+# PostgreSQL and Database Migrations
+sqlalchemy
+psycopg[binary]
+alembic
+
+# Redis and Async Operations
+redis
+httpx
+aiohttp
+
+# Authentication and Security
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+cryptography
+
+# Environment and Utilities
+python-dotenv
+pandas
+numpy
+orjson
+tenacity
+
+# Evaluation
+ragas==0.4.3
+datasets
+
+# Observability
+structlog
+prometheus-client
+
+# Testing
+pytest
+pytest-asyncio
+
+pwdlib[argon2]
