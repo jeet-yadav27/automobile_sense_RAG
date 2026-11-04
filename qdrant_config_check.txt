@@ -1,0 +1,16 @@
+services\hybrid_index.py:6:from qdrant_client import QdrantClient, models
+services\hybrid_index.py:12:QDRANT_URL = os.getenv(
+services\hybrid_index.py:13:    "QDRANT_URL", "http://localhost:6333"
+services\hybrid_index.py:25:client = QdrantClient(url=QDRANT_URL, timeout=60)
+services\hybrid_retrieval.py:7:from qdrant_client import QdrantClient, models
+services\hybrid_retrieval.py:17:qdrant = QdrantClient(
+services\hybrid_retrieval.py:18:    url=os.getenv("QDRANT_URL", "http://localhost:6333")
+services\retrieval_service.py:7:from qdrant_client import QdrantClient
+services\retrieval_service.py:23:qdrant_client = QdrantClient(
+services\retrieval_service.py:24:    url=os.getenv("QDRANT_URL", "http://localhost:6333")
+services\retrieval_service.py:68:from qdrant_client import QdrantClient
+services\retrieval_service.py:78:QDRANT_URL = os.getenv(
+services\retrieval_service.py:79:    "QDRANT_URL",
+services\retrieval_service.py:80:    "http://localhost:6333"
+services\retrieval_service.py:103:qdrant_client = QdrantClient(
+services\retrieval_service.py:104:    url=QDRANT_URL,

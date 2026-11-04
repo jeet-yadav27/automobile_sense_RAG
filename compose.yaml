@@ -1,0 +1,66 @@
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: warranty-rag-api
+
+    ports:
+      - "8000:8000"
+
+    env_file:
+      - .env
+
+    environment:
+      QDRANT_URL: http://host.docker.internal:6333
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DOCKER_DATABASE_URL:?Set DOCKER_DATABASE_URL in .env}
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    networks:
+      - warranty-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: warranty-rag-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - warranty-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: warranty-rag-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - warranty-network
+
+networks:
+  warranty-network:
+    driver: bridge
+
+volumes:
+  redis_data:

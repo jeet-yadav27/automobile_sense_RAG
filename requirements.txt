@@ -3,7 +3,7 @@
 fastapi
 uvicorn[standard]
 python-multipart
-pydantic
+pydantic[email]
 pydantic-settings
 
 # LangChain and LLM
@@ -20,6 +20,8 @@ tiktoken
 qdrant-client
 sentence-transformers
 rank-bm25
+# Vector Database and Retrieval
+fastembed
 
 # PDF and Document Processing
 pymupdf
