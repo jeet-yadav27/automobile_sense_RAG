@@ -2,6 +2,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 ALLOWED_ORIGINS = {
+    'https://warranty-rag-frontend.bravecoast-33edf5ab.centralindia.azurecontainerapps.io',
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8000",
