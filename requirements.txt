@@ -54,9 +54,12 @@ tenacity
 ragas==0.4.3
 datasets
 
+
 # Observability
 structlog
 prometheus-client
+azure-monitor-opentelemetry==1.8.12
+opentelemetry-instrumentation-fastapi==0.66b2
 
 # Testing
 pytest
@@ -64,3 +67,4 @@ pytest-asyncio
 
 pwdlib[argon2]
 psycopg2-binary
+

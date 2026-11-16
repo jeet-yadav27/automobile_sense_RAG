@@ -1,3 +1,7 @@
+from opentelemetry import trace
+
+tracer = trace.get_tracer(__name__)
+
 
 from pathlib import Path
 import sys
@@ -23,17 +27,41 @@ from services.hybrid_retrieval import hybrid_retrieve
 from services.reranking_service import rerank_documents
 
 
-def retrieve_and_rerank(question: str):
-    candidates = hybrid_retrieve(
-        question=question,
-        top_k=10
-    )
 
-    return rerank_documents(
-        question=question,
-        documents=candidates,
-        top_k=5
-    )
+def retrieve_and_rerank(question: str):
+
+    # Step 1: Hybrid retrieval
+    with tracer.start_as_current_span(
+        "rag.hybrid_retrieval"
+    ) as span:
+
+        candidates = hybrid_retrieve(
+            question=question,
+            top_k=10
+        )
+
+        span.set_attribute(
+            "rag.retrieval.candidate_count",
+            len(candidates)
+        )
+
+    # Step 2: CrossEncoder reranking
+    with tracer.start_as_current_span(
+        "rag.crossencoder_reranking"
+    ) as span:
+
+        documents = rerank_documents(
+            question=question,
+            documents=candidates,
+            top_k=5
+        )
+
+        span.set_attribute(
+            "rag.reranking.document_count",
+            len(documents)
+        )
+
+    return documents
 
 
 def format_context(documents):

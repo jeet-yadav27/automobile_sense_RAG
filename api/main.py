@@ -1,3 +1,14 @@
+import os
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+
+if connection_string:
+    configure_azure_monitor(
+        connection_string=connection_string,
+        enable_live_metrics=False,
+    )
+
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

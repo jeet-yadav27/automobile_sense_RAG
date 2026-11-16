@@ -4,14 +4,22 @@ from langchain_core.messages import (
     AIMessage,
 )
 
+from opentelemetry import trace
+
 from services.conversational_lcel import (
     rewrite_chain,
 )
+
 from services.lcel_rag import (
     retrieve_and_rerank,
     format_context,
     answer_chain,
 )
+
+
+# OpenTelemetry tracer
+# Uses the Azure Monitor provider configured in api/main.py.
+tracer = trace.get_tracer(__name__)
 
 
 def generate_persistent_answer(
@@ -31,19 +39,35 @@ def generate_persistent_answer(
                 AIMessage(content=message.content)
             )
 
-    search_question = rewrite_chain.invoke({
-        "chat_history": history,
-        "question": question,
-    })
+    # Step 1: Rewrite the question using conversation history.
+    with tracer.start_as_current_span("rag.query_rewrite"):
+        search_question = rewrite_chain.invoke({
+            "chat_history": history,
+            "question": question,
+        })
 
-    documents = retrieve_and_rerank(search_question)
+    # Step 2: Retrieve and rerank relevant documents.
+    with tracer.start_as_current_span(
+        "rag.retrieve_and_rerank"
+    ) as span:
+        documents = retrieve_and_rerank(search_question)
+
+        span.set_attribute(
+            "rag.retrieved_documents",
+            len(documents),
+        )
+
+    # Step 3: Format retrieved documents for the LLM.
     context = format_context(documents)
 
-    answer = answer_chain.invoke({
-        "question": question,
-        "context": context,
-    })
+    # Step 4: Generate the final answer.
+    with tracer.start_as_current_span("rag.answer_generation"):
+        answer = answer_chain.invoke({
+            "question": question,
+            "context": context,
+        })
 
+    # Step 5: Prepare document citations.
     sources = [
         {
             "page": doc["page"],

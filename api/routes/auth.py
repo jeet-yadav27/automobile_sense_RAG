@@ -1,4 +1,4 @@
-
+import os
 from datetime import datetime, timezone
 
 from fastapi import (
@@ -109,11 +109,12 @@ def login(
     db.add(session)
     db.commit()
 
+
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,  # Local HTTP only
+        secure=os.getenv("APP_ENV", "development").lower() == "production",
         samesite="lax",
         max_age=7 * 24 * 60 * 60,
         path="/",
