@@ -25,22 +25,6 @@ jobs:
     name: Validate application
     runs-on: ubuntu-latest
 
-    name: Install backend test dependencies
-    run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-api.txt
-          python -m pip install pytest
-
-    name: Run backend automated tests
-        env:
-          APPLICATIONINSIGHTS_CONNECTION_STRING: ""
-          LANGCHAIN_TRACING_V2: "false"
-        run: |
-          python -m pytest \
-            tests/test_health.py \
-            tests/test_security.py \
-            -v
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,6 +37,22 @@ jobs:
       - name: Validate Python syntax
         run: |
           python -m compileall -q api services db
+
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-api.txt
+          python -m pip install pytest
+
+      - name: Run backend automated tests
+        env:
+          APPLICATIONINSIGHTS_CONNECTION_STRING: ""
+          LANGCHAIN_TRACING_V2: "false"
+        run: |
+          python -m pytest \
+            tests/test_health.py \
+            tests/test_security.py \
+            -v
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -151,7 +151,7 @@ jobs:
           exit 1
 
       - name: Show deployed revisions
-        if: always()
+        if: success()
         run: |
           az containerapp revision list \
             --name "$BACKEND_APP" \
