@@ -41,9 +41,27 @@ export default function Chat({ user, onLogout }: Props) {
   }
 
   useEffect(() => {
-    refreshConversations().catch(() => {
-      setError("Could not load conversations");
-    });
+    let cancelled = false;
+  
+    async function loadInitialConversations() {
+      try {
+        const items = await listConversations();
+  
+        if (!cancelled) {
+          setConversations(items);
+        }
+      } catch {
+        if (!cancelled) {
+          setError("Could not load conversations");
+        }
+      }
+    }
+  
+    void loadInitialConversations();
+  
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function openConversation(id: string) {
