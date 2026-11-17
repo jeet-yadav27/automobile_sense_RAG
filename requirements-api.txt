@@ -10,7 +10,7 @@ pydantic-settings
 langchain
 langchain-core
 langchain-community
-langchain-openai
+langchain-openai>=1.1.14
 langchain-text-splitters
 langgraph
 openai
@@ -30,7 +30,6 @@ alembic
 redis
 
 # Authentication
-python-jose[cryptography]
 passlib[bcrypt]
 bcrypt
 cryptography
@@ -53,3 +52,8 @@ azure-monitor-opentelemetry==1.8.12
 opentelemetry-instrumentation-fastapi==0.66b2
 
 sentence-transformers
+
+certifi>=2026.10.18
+dnspython>=2.9.2
+filelock>=4.2.1
+pillow>=13.0.0
