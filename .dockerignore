@@ -17,3 +17,10 @@ data/
 requirements-before-ragas-fix.txt
 requirements-lock.txt
 backups/
+.github/
+github-oidc.json
+**/github-oidc.json
+**/.env
+**/.env.*
+*.pem
+*.key

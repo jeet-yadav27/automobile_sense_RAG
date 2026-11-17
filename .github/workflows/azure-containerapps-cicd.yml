@@ -1,0 +1,148 @@
+
+name: Automotive RAG - Azure CI/CD
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: automotive-rag-production
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-automobile-rag-dev
+  ACR_NAME: automobileragacr2026
+  ACR_LOGIN_SERVER: automobileragacr2026.azurecr.io
+  BACKEND_APP: warranty-rag-backend
+  FRONTEND_APP: warranty-rag-frontend
+  FRONTEND_URL: https://warranty-rag-frontend.bravecoast-33edf5ab.centralindia.azurecontainerapps.io
+
+jobs:
+  validate:
+    name: Validate application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate Python syntax
+        run: |
+          python -m compileall -q api services db
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npm run build
+
+  deploy:
+    name: Build and deploy to Azure
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -f Dockerfile.api \
+            -t "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}" \
+            .
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            -f frontend/Dockerfile \
+            -t "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}" \
+            frontend
+
+      - name: Push backend image
+        run: |
+          docker push \
+            "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}"
+
+      - name: Push frontend image
+        run: |
+          docker push \
+            "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}"
+
+      - name: Deploy backend
+        run: |
+          az containerapp update \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}"
+
+      - name: Deploy frontend
+        run: |
+          az containerapp update \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}"
+
+      - name: Verify backend health
+        run: |
+          for attempt in $(seq 1 20); do
+            status=$(curl -sS -o /dev/null -w "%{http_code}" \
+              --max-time 15 \
+              "$FRONTEND_URL/api/v1/health" || true)
+
+            if [ "$status" = "200" ]; then
+              echo "Backend health check passed"
+              exit 0
+            fi
+
+            echo "Attempt $attempt: HTTP $status"
+            sleep 10
+          done
+
+          echo "Backend health check failed"
+          exit 1
+
+      - name: Show deployed revisions
+        if: always()
+        run: |
+          az containerapp revision list \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output table
+
+          az containerapp revision list \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output table

@@ -23,3 +23,8 @@ qdrant_storage/
 
 .idea/
 .vscode/
+
+Add-Content -Path ".gitignore" -Value "`ngithub-oidc.json"
+github-oidc.json
+
+github-oidc.json
