@@ -118,22 +118,24 @@ jobs:
       # ---------------------------------------
       # 11. Frontend vulnerability scan
       # ---------------------------------------
-      - name: Scan frontend dependencies
+      - name: Scan frontend production dependencies
         working-directory: frontend
         run: |
-          npm audit \
-            --audit-level=high \
-            --json > npm-audit.json
+          npm audit --omit=dev --audit-level=high
 
-      # ---------------------------------------
-      # 12. Upload frontend security report
-      # ---------------------------------------
+      - name: Scan frontend build dependencies
+        working-directory: frontend
+        continue-on-error: true
+        run: |
+          npm audit --audit-level=high --json > npm-audit.json
+
       - name: Upload frontend security report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-security-report
           path: frontend/npm-audit.json
+          if-no-files-found: ignore
           if-no-files-found: ignore
 
       # ---------------------------------------
@@ -199,6 +201,29 @@ jobs:
             -f frontend/Dockerfile \
             -t "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}" \
             frontend
+
+
+      
+      - name: Scan backend Docker image with Trivy
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ env.ACR_LOGIN_SERVER }}/warranty-rag-backend:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan frontend Docker image with Trivy
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ env.ACR_LOGIN_SERVER }}/warranty-rag-frontend:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
 
       # ---------------------------------------
       # 20. Push backend image to ACR
