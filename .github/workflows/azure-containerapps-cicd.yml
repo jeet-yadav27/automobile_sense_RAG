@@ -46,6 +46,7 @@ jobs:
 
       - name: Run backend automated tests
         env:
+          DATABASE_URL: "postgresql+psycopg://test:test@localhost:5432/test_db"
           APPLICATIONINSIGHTS_CONNECTION_STRING: ""
           LANGCHAIN_TRACING_V2: "false"
         run: |
