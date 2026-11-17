@@ -22,28 +22,43 @@ env:
 
 jobs:
   validate:
-    name: Validate application
+    name: Validate and security scan
     runs-on: ubuntu-latest
 
     steps:
+      # ---------------------------------------
+      # 1. Checkout repository
+      # ---------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------
+      # 2. Python setup
+      # ---------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
+      # ---------------------------------------
+      # 3. Validate Python syntax
+      # ---------------------------------------
       - name: Validate Python syntax
         run: |
           python -m compileall -q api services db
 
+      # ---------------------------------------
+      # 4. Install backend dependencies
+      # ---------------------------------------
       - name: Install backend test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-api.txt
           python -m pip install pytest
 
+      # ---------------------------------------
+      # 5. Run backend tests
+      # ---------------------------------------
       - name: Run backend automated tests
         env:
           DATABASE_URL: "postgresql+psycopg://test:test@localhost:5432/test_db"
@@ -56,16 +71,25 @@ jobs:
             tests/test_security.py \
             -v
 
-            - name: Install Python security scanner
+      # ---------------------------------------
+      # 6. Install Python security scanner
+      # ---------------------------------------
+      - name: Install Python security scanner
         run: |
           python -m pip install pip-audit
 
+      # ---------------------------------------
+      # 7. Python dependency vulnerability scan
+      # ---------------------------------------
       - name: Scan Python dependencies
         run: |
           python -m pip_audit \
             --format json \
             --output python-audit.json
 
+      # ---------------------------------------
+      # 8. Upload Python security report
+      # ---------------------------------------
       - name: Upload Python security report
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,6 +98,9 @@ jobs:
           path: python-audit.json
           if-no-files-found: ignore
 
+      # ---------------------------------------
+      # 9. Node.js setup
+      # ---------------------------------------
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -81,10 +108,16 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # ---------------------------------------
+      # 10. Install frontend dependencies
+      # ---------------------------------------
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
+      # ---------------------------------------
+      # 11. Frontend vulnerability scan
+      # ---------------------------------------
       - name: Scan frontend dependencies
         working-directory: frontend
         run: |
@@ -92,6 +125,9 @@ jobs:
             --audit-level=high \
             --json > npm-audit.json
 
+      # ---------------------------------------
+      # 12. Upload frontend security report
+      # ---------------------------------------
       - name: Upload frontend security report
         if: always()
         uses: actions/upload-artifact@v4
@@ -100,10 +136,16 @@ jobs:
           path: frontend/npm-audit.json
           if-no-files-found: ignore
 
+      # ---------------------------------------
+      # 13. Frontend lint
+      # ---------------------------------------
       - name: Frontend lint
         working-directory: frontend
         run: npm run lint
 
+      # ---------------------------------------
+      # 14. Frontend production build
+      # ---------------------------------------
       - name: Frontend production build
         working-directory: frontend
         run: npm run build
@@ -115,9 +157,15 @@ jobs:
     environment: production
 
     steps:
+      # ---------------------------------------
+      # 15. Checkout repository
+      # ---------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------
+      # 16. Azure authentication using OIDC
+      # ---------------------------------------
       - name: Azure login using OIDC
         uses: azure/login@v2
         with:
@@ -125,9 +173,16 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      # ---------------------------------------
+      # 17. Login to Azure Container Registry
+      # ---------------------------------------
       - name: Login to Azure Container Registry
-        run: az acr login --name "$ACR_NAME"
+        run: |
+          az acr login --name "$ACR_NAME"
 
+      # ---------------------------------------
+      # 18. Build backend Docker image
+      # ---------------------------------------
       - name: Build backend image
         run: |
           docker build \
@@ -135,6 +190,9 @@ jobs:
             -t "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}" \
             .
 
+      # ---------------------------------------
+      # 19. Build frontend Docker image
+      # ---------------------------------------
       - name: Build frontend image
         run: |
           docker build \
@@ -142,16 +200,25 @@ jobs:
             -t "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}" \
             frontend
 
+      # ---------------------------------------
+      # 20. Push backend image to ACR
+      # ---------------------------------------
       - name: Push backend image
         run: |
           docker push \
             "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}"
 
+      # ---------------------------------------
+      # 21. Push frontend image to ACR
+      # ---------------------------------------
       - name: Push frontend image
         run: |
           docker push \
             "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}"
 
+      # ---------------------------------------
+      # 22. Deploy backend Container App
+      # ---------------------------------------
       - name: Deploy backend
         run: |
           az containerapp update \
@@ -159,6 +226,9 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --image "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}"
 
+      # ---------------------------------------
+      # 23. Deploy frontend Container App
+      # ---------------------------------------
       - name: Deploy frontend
         run: |
           az containerapp update \
@@ -166,6 +236,9 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --image "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}"
 
+      # ---------------------------------------
+      # 24. Verify backend health
+      # ---------------------------------------
       - name: Verify backend health
         run: |
           for attempt in $(seq 1 20); do
@@ -185,6 +258,9 @@ jobs:
           echo "Backend health check failed"
           exit 1
 
+      # ---------------------------------------
+      # 25. Show deployed revisions
+      # ---------------------------------------
       - name: Show deployed revisions
         if: success()
         run: |
