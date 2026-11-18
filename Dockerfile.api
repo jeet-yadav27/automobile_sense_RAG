@@ -1,19 +1,47 @@
 
-FROM python:3.13-slim
+# Stage 1: Build dependencies
+FROM python:3.13-slim AS builder
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements-api.txt .
+
+RUN pip install --no-cache-dir -r requirements-api.txt && \
+    pip check
+
+# Stage 2: Production runtime
+FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends libgomp1 && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements-api.txt .
+COPY --from=builder /opt/venv /opt/venv
 
-RUN python -m pip install --no-cache-dir -r requirements-api.txt
+# Remove pip tooling from runtime environment
+# Remove pip from both virtual environment and system Python
+RUN rm -rf /opt/venv/lib/python3.13/site-packages/pip \
+           /opt/venv/lib/python3.13/site-packages/pip-*.dist-info \
+           /opt/venv/bin/pip \
+           /opt/venv/bin/pip3 \
+           /opt/venv/bin/pip3.13 \
+           /usr/local/lib/python3.13/site-packages/pip \
+           /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+           /usr/local/bin/pip \
+           /usr/local/bin/pip3 \
+           /usr/local/bin/pip3.13
 
 COPY . .
 
