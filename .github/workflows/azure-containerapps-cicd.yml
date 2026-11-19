@@ -1,4 +1,4 @@
-
+﻿
 name: Automotive RAG - Azure CI/CD
 
 on:
@@ -276,15 +276,37 @@ jobs:
           echo "backend_previous=$BACKEND_PREVIOUS" >> "$GITHUB_OUTPUT"
           echo "frontend_previous=$FRONTEND_PREVIOUS" >> "$GITHUB_OUTPUT"
 
+
       # ---------------------------------------
-      # 22. b Deploy backend Container App
+      # 22. Deploy backend Container App
       # ---------------------------------------
       - name: Deploy backend
+        shell: bash
         run: |
-          az containerapp update \
-            --name "$BACKEND_APP" \
-            --resource-group "$RESOURCE_GROUP" \
-            --image "$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}"
+          set -euo pipefail
+
+          IMAGE="$ACR_LOGIN_SERVER/warranty-rag-backend:${GITHUB_SHA}"
+
+          for attempt in 1 2 3; do
+            echo "Backend deployment attempt $attempt"
+
+            if az containerapp update \
+              --name "$BACKEND_APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$IMAGE"; then
+
+              echo "Backend deployment command succeeded."
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "Backend deployment failed after 3 attempts."
+              exit 1
+            fi
+
+            echo "Waiting 30 seconds before retry..."
+            sleep 30
+          done
 
       # ---------------------------------------
       # 23. Deploy frontend Container App
@@ -649,6 +671,7 @@ jobs:
             --output table
 
 
+
       # ---------------------------------------
       # Automatic rollback on deployment failure
       # ---------------------------------------
@@ -663,16 +686,33 @@ jobs:
 
           echo "Deployment failed. Restoring previous revisions."
 
-          az containerapp revision activate \
-            --name "$BACKEND_APP" \
-            --resource-group "$RESOURCE_GROUP" \
-            --revision "$BACKEND_PREVIOUS"
+          # Activate old revisions only when inactive
+          for APP in "$BACKEND_APP" "$FRONTEND_APP"; do
+            if [ "$APP" = "$BACKEND_APP" ]; then
+              REVISION="$BACKEND_PREVIOUS"
+            else
+              REVISION="$FRONTEND_PREVIOUS"
+            fi
 
-          az containerapp revision activate \
-            --name "$FRONTEND_APP" \
-            --resource-group "$RESOURCE_GROUP" \
-            --revision "$FRONTEND_PREVIOUS"
+            ACTIVE=$(az containerapp revision show \
+              --name "$APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --revision "$REVISION" \
+              --query "properties.active" \
+              --output tsv)
 
+            if [ "${ACTIVE,,}" = "true" ]; then
+              echo "$REVISION already active. Skipping."
+            else
+              echo "Activating $REVISION"
+              az containerapp revision activate \
+                --name "$APP" \
+                --resource-group "$RESOURCE_GROUP" \
+                --revision "$REVISION"
+            fi
+          done
+
+          # Restore previous revision traffic
           az containerapp ingress traffic set \
             --name "$BACKEND_APP" \
             --resource-group "$RESOURCE_GROUP" \
@@ -685,34 +725,26 @@ jobs:
 
           echo "Previous revision traffic restored."
 
-
-
           # Verify rollback traffic allocation
           for APP in "$BACKEND_APP" "$FRONTEND_APP"; do
             if [ "$APP" = "$BACKEND_APP" ]; then
-              EXPECTED="$BACKEND_PREVIOUS"
+              REVISION="$BACKEND_PREVIOUS"
             else
-              EXPECTED="$FRONTEND_PREVIOUS"
+              REVISION="$FRONTEND_PREVIOUS"
             fi
 
-            echo "Verifying rollback for $APP"
-
-            TRAFFIC=$(az containerapp show \
+            WEIGHT=$(az containerapp show \
               --name "$APP" \
               --resource-group "$RESOURCE_GROUP" \
-              --query "properties.configuration.ingress.traffic" \
-              --output json)
+              --query "properties.configuration.ingress.traffic[?revisionName=='${REVISION}'].weight | [0]" \
+              --output tsv)
 
-            echo "$TRAFFIC" | jq -e --arg expected "$EXPECTED" '
-              length > 0 and
-              any(.[]; .revisionName == $expected and .weight == 100) and
-              all(.[]; .revisionName == $expected or .weight == 0)
-            ' > /dev/null || {
-              echo "ERROR: Rollback verification failed for $APP"
+            if [ "$WEIGHT" != "100" ]; then
+              echo "Rollback verification failed for $APP. Weight: $WEIGHT"
               exit 1
-            }
+            fi
 
-            echo "Rollback verified for $APP"
+            echo "$APP rollback verified: $REVISION = 100%"
           done
 
-          echo "Automatic rollback verification completed"
+          echo "Automatic rollback verification completed."
