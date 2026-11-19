@@ -1,4 +1,4 @@
-
+﻿
 name: Automotive RAG - Azure CI/CD
 
 on:
@@ -608,14 +608,6 @@ jobs:
       # ---------------------------------------
       # Promote validated revisions
       # ---------------------------------------
-      # ---------------------------------------
-      # TEMPORARY: Controlled rollback test
-      # ---------------------------------------
-      - name: Simulate deployment failure for rollback test
-        shell: bash
-        run: |
-          echo "ROLLBACK TEST: Simulating a failure before production promotion"
-          exit 1
       - name: Promote new revisions
         shell: bash
         env:
