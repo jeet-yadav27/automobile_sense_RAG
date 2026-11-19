@@ -204,7 +204,7 @@ jobs:
             frontend
 
 
-      
+
       - name: Scan backend Docker image with Trivy
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -242,8 +242,42 @@ jobs:
           docker push \
             "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}"
 
+
       # ---------------------------------------
-      # 22. Deploy backend Container App
+      # 22. Save healthy revisions for rollback
+      # ---------------------------------------
+      - name: Save healthy revisions
+        id: rollback_targets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BACKEND_PREVIOUS=$(az containerapp show \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query 'properties.configuration.ingress.traffic[?weight==`100`].revisionName | [0]' \
+            --output tsv)
+
+          FRONTEND_PREVIOUS=$(az containerapp show \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query 'properties.configuration.ingress.traffic[?weight==`100`].revisionName | [0]' \
+            --output tsv)
+
+          if [ -z "$BACKEND_PREVIOUS" ] || [ "$BACKEND_PREVIOUS" = "None" ] || \
+             [ -z "$FRONTEND_PREVIOUS" ] || [ "$FRONTEND_PREVIOUS" = "None" ]; then
+            echo "Could not identify revisions receiving 100% traffic."
+            exit 1
+          fi
+
+          echo "Previous backend: $BACKEND_PREVIOUS"
+          echo "Previous frontend: $FRONTEND_PREVIOUS"
+
+          echo "backend_previous=$BACKEND_PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "frontend_previous=$FRONTEND_PREVIOUS" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------
+      # 22. b Deploy backend Container App
       # ---------------------------------------
       - name: Deploy backend
         run: |
@@ -261,6 +295,320 @@ jobs:
             --name "$FRONTEND_APP" \
             --resource-group "$RESOURCE_GROUP" \
             --image "$ACR_LOGIN_SERVER/warranty-rag-frontend:${GITHUB_SHA}"
+
+
+      # ---------------------------------------
+      # Capture newly deployed revisions
+      # ---------------------------------------
+      - name: Capture new revisions
+        id: new_revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BACKEND_NEW=$(az containerapp show \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.latestRevisionName" \
+            --output tsv)
+
+          FRONTEND_NEW=$(az containerapp show \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.latestRevisionName" \
+            --output tsv)
+
+          echo "New backend revision: $BACKEND_NEW"
+          echo "New frontend revision: $FRONTEND_NEW"
+
+          if [ -z "$BACKEND_NEW" ] || [ -z "$FRONTEND_NEW" ]; then
+            echo "Failed to capture new revisions"
+            exit 1
+          fi
+
+          if [ "$BACKEND_NEW" = "${{ steps.rollback_targets.outputs.backend_previous }}" ] || \
+             [ "$FRONTEND_NEW" = "${{ steps.rollback_targets.outputs.frontend_previous }}" ]; then
+            echo "Expected new revisions were not created"
+            exit 1
+          fi
+
+          echo "backend_new=$BACKEND_NEW" >> "$GITHUB_OUTPUT"
+          echo "frontend_new=$FRONTEND_NEW" >> "$GITHUB_OUTPUT"
+
+
+      # ---------------------------------------
+      # Validate new Azure Container App revisions
+      # ---------------------------------------
+      - name: Validate new revisions
+        shell: bash
+        env:
+          BACKEND_NEW: ${{ steps.new_revisions.outputs.backend_new }}
+          FRONTEND_NEW: ${{ steps.new_revisions.outputs.frontend_new }}
+        run: |
+          set -euo pipefail
+
+          for APP in "$BACKEND_APP" "$FRONTEND_APP"; do
+            if [ "$APP" = "$BACKEND_APP" ]; then
+              REVISION="$BACKEND_NEW"
+            else
+              REVISION="$FRONTEND_NEW"
+            fi
+
+            echo "Checking $APP revision: $REVISION"
+
+            HEALTHY=false
+
+            for attempt in $(seq 1 30); do
+              STATUS=$(az containerapp revision show \
+                --name "$APP" \
+                --resource-group "$RESOURCE_GROUP" \
+                --revision "$REVISION" \
+                --query "properties.healthState" \
+                --output tsv)
+
+              echo "Attempt $attempt: $STATUS"
+
+              if [ "$STATUS" = "Healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+
+              sleep 10
+            done
+
+            if [ "$HEALTHY" != "true" ]; then
+              echo "Revision failed health validation: $REVISION"
+              exit 1
+            fi
+          done
+
+          echo "Both new revisions passed Azure health validation"
+
+
+      # ---------------------------------------
+      # Verify production traffic remains pinned
+      # ---------------------------------------
+      - name: Verify production traffic is pinned
+        shell: bash
+        env:
+          BACKEND_PREVIOUS: ${{ steps.rollback_targets.outputs.backend_previous }}
+          FRONTEND_PREVIOUS: ${{ steps.rollback_targets.outputs.frontend_previous }}
+        run: |
+          set -euo pipefail
+
+          for APP in "$BACKEND_APP" "$FRONTEND_APP"; do
+            if [ "$APP" = "$BACKEND_APP" ]; then
+              EXPECTED="$BACKEND_PREVIOUS"
+            else
+              EXPECTED="$FRONTEND_PREVIOUS"
+            fi
+
+            echo "Checking traffic for $APP"
+
+            TRAFFIC=$(az containerapp show \
+              --name "$APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "properties.configuration.ingress.traffic" \
+              --output json)
+
+            echo "$TRAFFIC"
+
+            echo "$TRAFFIC" | jq -e --arg expected "$EXPECTED" '
+              length > 0 and
+              all(.[];
+                .revisionName == $expected and
+                .weight == 100 and
+                (.latestRevision != true)
+              )
+            ' > /dev/null || {
+              echo "Unexpected production traffic configuration for $APP"
+              exit 1
+            }
+          done
+
+          echo "Production traffic is safely pinned"
+
+
+
+
+      # ---------------------------------------
+
+      # ---------------------------------------
+      # Pre-promotion backend health check
+      # ---------------------------------------
+      - name: Check new backend before promotion
+        shell: bash
+        env:
+          BACKEND_NEW: ${{ steps.new_revisions.outputs.backend_new }}
+        run: |
+          set -euo pipefail
+
+          JOB_NAME="rag-backend-healthcheck"
+          API_VERSION="2024-03-01"
+
+          FQDN=$(az containerapp revision show \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision "$BACKEND_NEW" \
+            --query "properties.fqdn" \
+            --output tsv)
+
+          if [ -z "$FQDN" ] || [ "$FQDN" = "None" ]; then
+            echo "Backend revision FQDN not found"
+            exit 1
+          fi
+
+          TARGET_URL="http://${FQDN}/api/v1/health"
+          echo "Testing backend revision: $BACKEND_NEW"
+
+          JOB_ID=$(az containerapp job show \
+            --name "$JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query id --output tsv)
+
+          az rest \
+            --method GET \
+            --url "https://management.azure.com${JOB_ID}?api-version=${API_VERSION}" \
+            --output json > healthcheck-job.json
+
+          python3 - "$TARGET_URL" <<'PY'
+          import json
+          import sys
+
+          target_url = sys.argv[1]
+
+          with open("healthcheck-job.json", encoding="utf-8") as f:
+              job = json.load(f)
+
+          container = job["properties"]["template"]["containers"][0]
+          container["command"] = ["curl"]
+          container["args"] = [
+              "--fail",
+              "--silent",
+              "--show-error",
+              "--max-time",
+              "15",
+              target_url
+          ]
+          container.pop("env", None)
+
+          with open("healthcheck-updated.json", "w") as f:
+              json.dump(job, f)
+          PY
+
+          az rest \
+            --method PUT \
+            --url "https://management.azure.com${JOB_ID}?api-version=${API_VERSION}" \
+            --headers "Content-Type=application/json" \
+            --body "@healthcheck-updated.json" \
+            --output none
+
+
+
+          # Verify Azure saved the intended health-check target
+          SAVED_URL=$(az containerapp job show \
+            --name "$JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.template.containers[0].args[-1]" \
+            --output tsv)
+
+          echo "Expected target: $TARGET_URL"
+          echo "Saved target: $SAVED_URL"
+
+          if [ "$SAVED_URL" != "$TARGET_URL" ]; then
+            echo "ERROR: Health-check job target mismatch"
+            exit 1
+          fi
+
+          echo "Health-check job configuration verified"
+
+
+          EXECUTION=$(az containerapp job start \
+            --name "$JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query name --output tsv)
+
+          if [ -z "$EXECUTION" ]; then
+            echo "Health-check job did not start"
+            exit 1
+          fi
+
+          echo "Execution: $EXECUTION"
+
+
+          # Verify the actual execution targets the new revision
+          EXECUTION_URL=$(az containerapp job execution show \
+            --name "$JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --job-execution-name "$EXECUTION" \
+            --query "properties.template.containers[0].args[-1]" \
+            --output tsv)
+
+          echo "Execution target: $EXECUTION_URL"
+
+          if [ "$EXECUTION_URL" != "$TARGET_URL" ]; then
+            echo "ERROR: Execution targets the wrong backend revision"
+            exit 1
+          fi
+
+          echo "Execution target verified"
+
+
+          for attempt in $(seq 1 30); do
+            STATUS=$(az containerapp job execution show \
+              --name "$JOB_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --job-execution-name "$EXECUTION" \
+              --query "properties.status" \
+              --output tsv)
+
+            echo "Attempt $attempt: $STATUS"
+
+            if [ "$STATUS" = "Succeeded" ]; then
+              echo "Backend health check passed"
+              exit 0
+            fi
+
+            if [ "$STATUS" = "Failed" ]; then
+              echo "Backend health check failed"
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "Backend health check timed out"
+          exit 1
+
+
+
+
+      # ---------------------------------------
+      # Promote validated revisions
+      # ---------------------------------------
+      - name: Promote new revisions
+        shell: bash
+        env:
+          BACKEND_NEW: ${{ steps.new_revisions.outputs.backend_new }}
+          FRONTEND_NEW: ${{ steps.new_revisions.outputs.frontend_new }}
+        run: |
+          set -euo pipefail
+
+          echo "Promoting backend revision: $BACKEND_NEW"
+
+          az containerapp ingress traffic set \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision-weight "$BACKEND_NEW=100"
+
+          echo "Promoting frontend revision: $FRONTEND_NEW"
+
+          az containerapp ingress traffic set \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision-weight "$FRONTEND_NEW=100"
+
+          echo "Traffic promotion commands completed."
 
       # ---------------------------------------
       # 24. Verify backend health
@@ -299,3 +647,72 @@ jobs:
             --name "$FRONTEND_APP" \
             --resource-group "$RESOURCE_GROUP" \
             --output table
+
+
+      # ---------------------------------------
+      # Automatic rollback on deployment failure
+      # ---------------------------------------
+      - name: Rollback on deployment failure
+        if: ${{ failure() && steps.rollback_targets.outcome == 'success' }}
+        shell: bash
+        env:
+          BACKEND_PREVIOUS: ${{ steps.rollback_targets.outputs.backend_previous }}
+          FRONTEND_PREVIOUS: ${{ steps.rollback_targets.outputs.frontend_previous }}
+        run: |
+          set -euo pipefail
+
+          echo "Deployment failed. Restoring previous revisions."
+
+          az containerapp revision activate \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision "$BACKEND_PREVIOUS"
+
+          az containerapp revision activate \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision "$FRONTEND_PREVIOUS"
+
+          az containerapp ingress traffic set \
+            --name "$BACKEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision-weight "$BACKEND_PREVIOUS=100"
+
+          az containerapp ingress traffic set \
+            --name "$FRONTEND_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --revision-weight "$FRONTEND_PREVIOUS=100"
+
+          echo "Previous revision traffic restored."
+
+
+
+          # Verify rollback traffic allocation
+          for APP in "$BACKEND_APP" "$FRONTEND_APP"; do
+            if [ "$APP" = "$BACKEND_APP" ]; then
+              EXPECTED="$BACKEND_PREVIOUS"
+            else
+              EXPECTED="$FRONTEND_PREVIOUS"
+            fi
+
+            echo "Verifying rollback for $APP"
+
+            TRAFFIC=$(az containerapp show \
+              --name "$APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "properties.configuration.ingress.traffic" \
+              --output json)
+
+            echo "$TRAFFIC" | jq -e --arg expected "$EXPECTED" '
+              length > 0 and
+              any(.[]; .revisionName == $expected and .weight == 100) and
+              all(.[]; .revisionName == $expected or .weight == 0)
+            ' > /dev/null || {
+              echo "ERROR: Rollback verification failed for $APP"
+              exit 1
+            }
+
+            echo "Rollback verified for $APP"
+          done
+
+          echo "Automatic rollback verification completed"
