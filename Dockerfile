@@ -1,23 +1,29 @@
 
-FROM python:3.14-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
-# Required by some scientific/PDF dependencies
+# Update Debian packages and install runtime library
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    build-essential \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY requirements-api.txt .
 
-RUN python -m pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Upgrade packaging tools and install application dependencies
+RUN python -m pip install --no-cache-dir --upgrade \
+      "pip" \
+      "setuptools>=78.1.1" && \
+    python -m pip install --no-cache-dir \
+      -r requirements-api.txt \
+      "msgpack>=1.2.3" \
+      "urllib3>=2.8.0" && \
+    python -m pip check
 
 COPY . .
 
